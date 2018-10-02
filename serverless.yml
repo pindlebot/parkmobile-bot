@@ -18,6 +18,7 @@ provider:
     CHROMELESS_S3_BUCKET_NAME: 'documentqueue'
     BITLY_API_KEY: ${ssm:/parkmobile-bot/bitly_api_key~true}
     CHROMELESS_S3_BUCKET_URL: s3.amazonaws.com/documentqueue
+    REDIS_URL: ${ssm:/parkmobile-bot/redis_url~true}
 
   iamRoleStatements:
     - Effect: "Allow"
@@ -39,7 +40,7 @@ functions:
     timeout: 300
     handler: handler.handler
     events:
-      - schedule: rate(2 hours)
+      - schedule: rate(5 minutes)
 
 resources:
   Resources:

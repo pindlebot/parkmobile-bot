@@ -3,6 +3,7 @@ const sns = new AWS.SNS({ region: 'us-east-1' })
 const mime = require('mime-types')
 const aws4 = require('aws4')
 const shorten = require('bitly-shorten')
+const redis = require('redis')
 
 if (!process.env.AWS_SESSION_TOKEN) {
   require('dotenv').config()
@@ -36,7 +37,7 @@ const login = async (chromeless) => {
 const sleep = () => new Promise((resolve, reject) => setTimeout(resolve, 1000))
 
 const sign = async (rawUrl) => {
-  let key = rawUrl.split('/').pop()
+  let key = require('url').parse(rawUrl).pathname.split('/').pop()
   const type = encodeURIComponent(mime.lookup(key))
   const Bucket = process.env.CHROMELESS_S3_BUCKET_NAME
   const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -48,48 +49,73 @@ const sign = async (rawUrl) => {
     region: AWS_REGION,
     signQuery: true,
   })
-  return shorten(`https://${host}${signed.path}`)
-    .then(resp => {
-      console.log(resp)
-      return resp.data.url
-    })
+  let longUrl = `https://${host}${signed.path}`
+
+  return shorten(longUrl, { apiKey: process.env.BITLY_API_KEY })
+    .then(({ data }) => data.url)
 }
 
-const run = async (chromeless) => {
+const selectors = {
+  ZONE: 'input#ctl00_cphMain_ucPermitParkingCasualStart1_dgUsers_ctl02_tbZone',
+  START_PARKING: 'a#ctl00_cphMain_ucPermitParkingCasualStart1_lnkStartParking',
+  CONFIRM_PAYMENT: 'input#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_cbConfirmPayment',
+  PARKING_DURATION_SELECT: '#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_ddCustom',
+  DUPLICATE_SESSION_WARNING: 'span#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_lblDuplicateSessionWarning',
+  PARKING_DURATION_CUSTOM_OPTION: '#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_rbDurationType_1'
+}
+
+const run = async (chromeless, client, cache) => {
   const zone = '1208918'
   await login(chromeless)
   await chromeless
     .goto('https://dlweb.parkmobile.us/Phonixx/personalpages/parking-start/')
-    .type(zone, 'input#ctl00_cphMain_ucPermitParkingCasualStart1_dgUsers_ctl02_tbZone')
+    .type(zone, selectors.ZONE)
     .evaluate(() => {
       __doPostBack('ctl00$cphMain$ucPermitParkingCasualStart1$lnkStartParking','')
     })
   await sleep()
-  await chromeless.click('a#ctl00_cphMain_ucPermitParkingCasualStart1_lnkStartParking')
+  await chromeless.click(selectors.START_PARKING)
   await sleep()
-  await chromeless.click('#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_rbDurationType_1')
+  await chromeless.click(selectors.PARKING_DURATION_CUSTOM_OPTION)
     .catch(err => {
       console.error(err)
       throw err
     })
   await sleep()
   await chromeless
-    .click('#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_ddCustom')
-    .evaluate(() => {
-      let elem = document.querySelector('#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_ddCustom')
+    .click(selectors.PARKING_DURATION_SELECT)
+    .evaluate(([startParking, duration]) => {
+      let elem = document.querySelector(duration)
       let children = [...elem.children]
-      elem.value = children[1].value
+      let value = children[1].value
+      elem.value = value
       elem.blur()
-      document.querySelector('a#ctl00_cphMain_ucPermitParkingCasualStart1_lnkStartParking').click()
-    })
+      document.querySelector(startParking).click()
+      return value
+    }, [selectors.START_PARKING, selectors.PARKING_DURATION_SELECT])
+  
   await sleep()
-  let exists = await chromeless.evaluate(() => {
-    let elem = document.querySelector('input#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_cbConfirmPayment')
+  let exists = await chromeless.evaluate((confirmPayment) => {
+    let elem = document.querySelector(confirmPayment)
     return elem && elem.id
-  })
+  }, selectors.CONFIRM_PAYMENT)
   if (!exists) {
+    let warning = await chromeless.evaluate((sessionWarning) => {
+      return document.querySelector(sessionWarning).textContent
+    }, selectors.DUPLICATE_SESSION_WARNING)
+    let [offset] = warning.match(/[\d]{1,2}:[\d]{1,2}:[\d]{1,2}/g)
+    let [hours, minutes, seconds] = offset.split(':')
+    hours = parseInt(hours) - (new Date().getHours() - 4 - 12)
+    minutes = parseInt(minutes) - (new Date().getMinutes())
+    seconds = parseInt(seconds) - (new Date().getSeconds())
+    let expires = (hours * 3600) + (minutes * 60) + seconds
+    let currentTimestamp = Math.floor((new Date().getTime()) / 1000)
+    let timestamp = currentTimestamp + expires - (5 * 60)
+    await new Promise((resolve, reject) => {
+      client.set('parkmobile-bot', JSON.stringify({ timestamp }), resolve)
+    })
     let url = await chromeless.screenshot()
-    let short = await sign(url)
+    let short = await sign(url).catch(err => '')
     console.log(short)
     return
   }
@@ -99,7 +125,7 @@ const run = async (chromeless) => {
       document.querySelector('a#ctl00_cphMain_ucPermitParkingCasualStart1_lnkStartParking').click()
     })
   let url = await chromeless.screenshot()
-  let short = await sign(url)
+  let short = await sign(url).catch(err => '')
   console.log(short)
 
   await sns.publish({
@@ -111,16 +137,33 @@ const run = async (chromeless) => {
 }
 
 module.exports.handler = async (event, context, callback) => {
-  let hours = new Date().getHours() - 4
-  console.log({ hours })
+  let timestamp = Math.floor(new Date().getTime() / 1000)
+  let client = redis.createClient(process.env.REDIS_URL)
+  await new Promise((resolve, reject) => client.on('connect', resolve))
+  let cache = await new Promise((resolve, reject) => 
+    client.get('parkmobile-bot', (err, data) => {
+      if (err) reject(err)
+      else resolve(data ? JSON.parse(data) : null)
+    })
+  )
+  if (!cache) cache = { timestamp }
+  cache.timestamp = parseInt(cache.timestamp)
+  console.log(`time until next reservation: ${(cache.timestamp - timestamp) / 60} minutes`)
+
+  if (timestamp < cache.timestamp) {
+    console.log('Exiting...')
+    await new Promise((resolve, reject) => client.quit(resolve))
+    return callback(null, {})
+  }
   const chrome = await launchChrome()
   const chromeless = new Chromeless({
     launchChrome: false
   })
-  await run(chromeless).catch((err) => {
+  await run(chromeless, client, cache).catch((err) => {
     console.log(err)
   })
   await chromeless.end()
   chrome.kill()
+  await new Promise((resolve, reject) => client.quit(resolve))
   callback(null, {})
 }
