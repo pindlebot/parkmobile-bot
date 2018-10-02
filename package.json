@@ -1,0 +1,14 @@
+{
+  "name": "parkmobile-bot",
+  "version": "0.0.1",
+  "main": "handler",
+  "license": "MIT",
+  "dependencies": {
+    "@serverless-chrome/lambda": "^1.0.0-55",
+    "aws4": "^1.8.0",
+    "bitly-shorten": "0.0.4",
+    "chromeless": "^1.5.2",
+    "dotenv": "^6.0.0",
+    "mime-types": "^2.1.20"
+  }
+}

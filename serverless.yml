@@ -1,0 +1,48 @@
+service: parkmobile-bot
+
+custom:
+  stage: prod
+  debug: "*"
+  deploymentBucket: 'global-deployment-bucket'
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  stage: ${self:custom.stage}
+  region: us-east-1
+  deploymentBucket:
+    name: ${self:custom.deploymentBucket}
+  environment:
+    LOGIN: ${ssm:/parkmobile-bot/login}
+    PASSWORD: ${ssm:/parkmobile-bot/password~true}
+    CHROMELESS_S3_BUCKET_NAME: 'documentqueue'
+    BITLY_API_KEY: ${ssm:/parkmobile-bot/bitly_api_key~true}
+    CHROMELESS_S3_BUCKET_URL: s3.amazonaws.com/documentqueue
+
+  iamRoleStatements:
+    - Effect: "Allow"
+      Resource: "*"
+      Action:
+        - "sns:*"
+    - Effect: "Allow"
+      Resource: "*"
+      Action:
+        - "s3:*"
+    - Effect: "Allow"
+      Resource: "*"
+      Action:
+        - "sts:*"
+
+functions:
+  handler:
+    memorySize: 2024
+    timeout: 300
+    handler: handler.handler
+    events:
+      - schedule: rate(2 hours)
+
+resources:
+  Resources:
+    HandlerLogGroup:
+      Properties:
+        RetentionInDays: 7
