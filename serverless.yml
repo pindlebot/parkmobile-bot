@@ -19,7 +19,7 @@ provider:
     BITLY_API_KEY: ${ssm:/parkmobile-bot/bitly_api_key~true}
     CHROMELESS_S3_BUCKET_URL: s3.amazonaws.com/documentqueue
     REDIS_URL: ${ssm:/parkmobile-bot/redis_url~true}
-
+    PARKING_ZONE: ${ssm:/parkmobile-bot/parking-zone}
   iamRoleStatements:
     - Effect: "Allow"
       Resource: "*"

@@ -1,0 +1,10 @@
+const selectors = {
+  ZONE: 'input#ctl00_cphMain_ucPermitParkingCasualStart1_dgUsers_ctl02_tbZone',
+  START_PARKING: 'a#ctl00_cphMain_ucPermitParkingCasualStart1_lnkStartParking',
+  CONFIRM_PAYMENT: 'input#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_cbConfirmPayment',
+  PARKING_DURATION_SELECT: '#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_ddCustom',
+  DUPLICATE_SESSION_WARNING: 'span#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_lblDuplicateSessionWarning',
+  PARKING_DURATION_CUSTOM_OPTION: '#ctl00_cphMain_ucPermitParkingCasualStart1_UcPermitParkingCasualDuration_rbDurationType_1'
+}
+
+module.exports = selectors
